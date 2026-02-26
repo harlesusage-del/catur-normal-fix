@@ -1,0 +1,146 @@
+<!DOCTYPE html>
+<html lang="id">
+
+<head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no" />
+    <title>Genius Chess</title>
+    <link rel="manifest" href="manifest.json">
+    <meta name="theme-color" content="#0B1D2A">
+    <link rel="stylesheet" href="style.css" />
+</head>
+
+<body>
+
+    <!-- ===== MENU SCREEN ===== -->
+    <div id="screen-menu" class="screen active">
+        <div class="menu-bg"></div>
+        <div class="menu-content">
+            <div class="logo">
+                <div class="logo-icon">♛</div>
+                <h1 class="logo-title">GENIUS<br>CHESS</h1>
+                <p class="logo-sub">2 PLAYER · LOCAL</p>
+            </div>
+            <div class="menu-buttons">
+                <button class="btn-mode" onclick="startGame('normal')">
+          <span class="btn-icon">♟</span>
+          <div class="btn-text">
+            <span class="btn-label">START NORMAL</span>
+            <span class="btn-desc">8×8 · Classic Rules</span>
+          </div>
+        </button>
+                <button class="btn-mode" onclick="startGame('gawaras')">
+          <span class="btn-icon">♻</span>
+          <div class="btn-text">
+            <span class="btn-label">START WARAS</span>
+            <span class="btn-desc">8×8 · Pieces Respawn!</span>
+          </div>
+        </button>
+                <button class="btn-mode" onclick="startGame('openworld')">
+          <span class="btn-icon">🌐</span>
+          <div class="btn-text">
+            <span class="btn-label">START OPEN WORLD</span>
+            <span class="btn-desc">100×100 · Infinite Battle</span>
+          </div>
+        </button>
+                <button class="btn-mode" onclick="startGame('spektator')">
+          <span class="btn-icon">🙈</span>
+          <div class="btn-text">
+            <span class="btn-label">START SPEKTATOR</span>
+            <span class="btn-desc">8×8 · Bidak musuh tersembunyi!</span>
+          </div>
+        </button>
+                <button class="btn-mode btn-war" onclick="startGame('perang')">
+          <span class="btn-icon">⚔️</span>
+          <div class="btn-text">
+            <span class="btn-label">START PERANG</span>
+            <span class="btn-desc">8×8 · Aturan tempur khusus!</span>
+          </div>
+        </button>
+            </div>
+        </div>
+    </div>
+
+    <!-- ===== SPEKTATOR PASS SCREEN ===== -->
+    <div id="screen-reveal" class="screen">
+        <div class="reveal-content">
+            <div class="reveal-icon" id="reveal-icon">🙈</div>
+            <h2 class="reveal-title" id="reveal-title">GILIRAN PUTIH</h2>
+            <p class="reveal-sub" id="reveal-sub">Berikan HP ke <strong>Pemain Putih</strong></p>
+            <p class="reveal-hint">Tap tombol di bawah ketika sudah siap</p>
+            <button class="btn-reveal" id="btn-reveal" onclick="revealBoard()">👁 LIHAT BIDAK SAYA</button>
+        </div>
+    </div>
+
+    <!-- ===== GAME SCREEN ===== -->
+    <div id="screen-game" class="screen">
+
+        <!-- Header: turn indicator LEFT, mode label + back button RIGHT -->
+        <div class="game-header">
+            <div id="turn-indicator" class="turn-indicator">
+                <span id="turn-text">GILIRAN PUTIH ♔</span>
+            </div>
+            <div class="header-right">
+                <div id="mode-label" class="mode-label">NORMAL</div>
+                <button class="btn-back" onclick="backToMenu()">✕ MENU</button>
+            </div>
+        </div>
+
+        <!-- Check / Checkmate / War alert banner -->
+        <div id="check-alert" class="check-alert hidden">
+            <span id="check-alert-text">⚠ SKAK!</span>
+        </div>
+
+        <!-- Mode Perang: rules reminder bar -->
+        <div id="war-legend" class="war-legend hidden">
+            <span class="wl-item" title="Benteng tidak bisa dimakan">🏰 Kebal</span>
+            <span class="wl-sep">·</span>
+            <span class="wl-item" title="Kuda: ledak radius 1">🐴 Ledak</span>
+            <span class="wl-sep">·</span>
+            <span class="wl-item" title="Uskup: sapu serong depan">🗡 Sapu</span>
+            <span class="wl-sep">·</span>
+            <span class="wl-item" title="Ratu: tembak 3 arah depan">👑 Tembak</span>
+            <span class="wl-sep">·</span>
+            <span class="wl-item" title="Raja jalan 2 langkah">⚔ Raja×2</span>
+        </div>
+
+        <!-- Game body -->
+        <div id="game-body" class="game-body">
+
+            <!-- Open World D-pad sidebar (LEFT) — only shown in openworld mode -->
+            <div id="ow-sidebar" class="ow-sidebar hidden">
+                <div class="ow-dpad">
+                    <button class="dpad-btn" id="dpad-up" ontouchstart="startScroll('up')" ontouchend="stopScroll()" onmousedown="startScroll('up')" onmouseup="stopScroll()">▲</button>
+                    <button class="dpad-btn" id="dpad-left" ontouchstart="startScroll('left')" ontouchend="stopScroll()" onmousedown="startScroll('left')" onmouseup="stopScroll()">◀</button>
+                    <button class="dpad-btn dpad-center" onclick="centerCamera()">⊙</button>
+                    <button class="dpad-btn" id="dpad-right" ontouchstart="startScroll('right')" ontouchend="stopScroll()" onmousedown="startScroll('right')" onmouseup="stopScroll()">▶</button>
+                    <button class="dpad-btn" id="dpad-down" ontouchstart="startScroll('down')" ontouchend="stopScroll()" onmousedown="startScroll('down')" onmouseup="stopScroll()">▼</button>
+                </div>
+                <div class="ow-info"><span id="cam-pos">0,0</span></div>
+            </div>
+
+            <!-- Board -->
+            <div id="board-wrapper" class="board-wrapper">
+                <div id="board" class="board"></div>
+            </div>
+
+        </div>
+    </div>
+
+    <!-- ===== GAME OVER SCREEN ===== -->
+    <div id="screen-gameover" class="screen">
+        <div class="gameover-content">
+            <div class="gameover-icon" id="gameover-icon">♛</div>
+            <h2 class="gameover-title" id="gameover-title">PUTIH MENANG</h2>
+            <p class="gameover-sub" id="gameover-sub">Pemain Putih menang!</p>
+            <div class="gameover-buttons">
+                <button class="btn-action" onclick="playAgain()">PLAY AGAIN</button>
+                <button class="btn-action btn-secondary" onclick="backToMenu()">BACK TO MENU</button>
+            </div>
+        </div>
+    </div>
+
+    <script src="script.js"></script>
+</body>
+
+</html>
