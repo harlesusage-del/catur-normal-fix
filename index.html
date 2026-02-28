@@ -57,6 +57,67 @@
             <span class="btn-desc">8×8 · Aturan tempur khusus!</span>
           </div>
         </button>
+                <button class="btn-mode btn-custom" onclick="showCustomSetup()">
+          <span class="btn-icon">🛠️</span>
+          <div class="btn-text">
+            <span class="btn-label">START CUSTOM</span>
+            <span class="btn-desc">Atur papan & bidak sesukamu!</span>
+          </div>
+        </button>
+                <button class="btn-mode btn-pvp" onclick="startGame('pvp')">
+          <span class="btn-icon">❤️</span>
+          <div class="btn-text">
+            <span class="btn-label">START PVP</span>
+            <span class="btn-desc">8×8 · Bidak punya nyawa!</span>
+          </div>
+        </button>
+                <button class="btn-mode btn-puasa" onclick="startGame('puasa')">
+          <span class="btn-icon">🐢</span>
+          <div class="btn-text">
+            <span class="btn-label">START PUASA</span>
+            <span class="btn-desc">8×8 · Semua bidak 1 kotak!</span>
+          </div>
+        </button>
+            </div>
+        </div>
+    </div>
+
+    <!-- ===== CUSTOM SETUP SCREEN ===== -->
+    <div id="screen-custom" class="screen">
+        <div class="custom-setup-content">
+            <h2 class="custom-title">🛠️ CUSTOM SETUP</h2>
+            <div class="custom-form">
+                <div class="custom-group">
+                    <label class="custom-label">Ukuran Papan</label>
+                    <div class="custom-row">
+                        <span class="custom-hint">Lebar (kolom): <span id="val-cols">8</span></span>
+                        <input type="range" id="inp-cols" min="4" max="20" value="8" oninput="document.getElementById('val-cols').textContent=this.value">
+                    </div>
+                    <div class="custom-row">
+                        <span class="custom-hint">Tinggi (baris): <span id="val-rows">8</span></span>
+                        <input type="range" id="inp-rows" min="4" max="20" value="8" oninput="document.getElementById('val-rows').textContent=this.value">
+                    </div>
+                </div>
+                <div class="custom-group">
+                    <label class="custom-label">Pengganda Bidak Inti</label>
+                    <div class="custom-row">
+                        <span class="custom-hint">Ganda: <span id="val-core">1</span>x</span>
+                        <input type="range" id="inp-core" min="1" max="100" value="1" oninput="document.getElementById('val-core').textContent=this.value">
+                    </div>
+                    <p class="custom-note">Raja, Ratu, Benteng, Kuda, Uskup — masing-masing × ganda</p>
+                </div>
+                <div class="custom-group">
+                    <label class="custom-label">Pengganda Pion</label>
+                    <div class="custom-row">
+                        <span class="custom-hint">Ganda: <span id="val-pawn">1</span>x</span>
+                        <input type="range" id="inp-pawn" min="1" max="100" value="1" oninput="document.getElementById('val-pawn').textContent=this.value">
+                    </div>
+                    <p class="custom-note">Jumlah pion per baris × ganda (dibagi ke beberapa baris jika penuh)</p>
+                </div>
+                <div class="custom-buttons">
+                    <button class="btn-action" onclick="startCustomGame()">▶ MAIN!</button>
+                    <button class="btn-action btn-secondary" onclick="backToMenu()">✕ BATAL</button>
+                </div>
             </div>
         </div>
     </div>
@@ -102,6 +163,28 @@
             <span class="wl-item" title="Ratu: tembak 3 arah depan">👑 Tembak</span>
             <span class="wl-sep">·</span>
             <span class="wl-item" title="Raja jalan 2 langkah">⚔ Raja×2</span>
+        </div>
+
+        <!-- Mode PvP: HP legend bar -->
+        <div id="pvp-legend" class="pvp-legend hidden">
+            <span class="pvl-item">♚ 20hp</span>
+            <span class="pvl-sep">·</span>
+            <span class="pvl-item">♛ 15hp</span>
+            <span class="pvl-sep">·</span>
+            <span class="pvl-item">♜ 30hp</span>
+            <span class="pvl-sep">·</span>
+            <span class="pvl-item">♞ 13hp</span>
+            <span class="pvl-sep">·</span>
+            <span class="pvl-item">♝ 10hp</span>
+            <span class="pvl-sep">·</span>
+            <span class="pvl-item">♟ 3hp</span>
+            <span class="pvl-sep">·</span>
+            <span class="pvl-item" style="color:#FFB700">Serang=−1hp · Penyerang terpental</span>
+        </div>
+
+        <!-- Mode Puasa: legend bar -->
+        <div id="puasa-legend" class="puasa-legend hidden">
+            <span class="puasa-item">🐢 MODE PUASA: Semua bidak hanya boleh melangkah 1 kotak!</span>
         </div>
 
         <!-- Game body -->

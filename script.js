@@ -1,6 +1,6 @@
 /* =============================================
    CUSTOM CHESS - script.js
-   Modes: normal | gawaras | openworld | spektator | perang
+   Modes: normal | gawaras | openworld | spektator | perang | custom | pvp | puasa
 
    MODE PERANG special rules:
    R (Benteng) : KEBAL — tidak bisa dimakan oleh siapapun
@@ -12,6 +12,21 @@
                           lurus depan, serong kanan depan) dari posisi
                           tujuan ikut terhapus (1 langkah)
    K (Raja)    : SUPER  — bisa jalan 2 langkah ke segala arah
+
+   MODE CUSTOM:
+   - Ukuran papan bebas (lebar & tinggi independen, 4–20)
+   - Pengganda bidak inti (Raja, Ratu, Benteng, Kuda, Uskup) 1–100x
+   - Pengganda pion 1–100x
+   - Kemenangan: Raja musuh semua tereliminasi
+
+   MODE PVP:
+   - Setiap bidak punya nyawa: Raja=20, Ratu=15, Benteng=30, Kuda=13, Uskup=10, Pion=3
+   - Saat menyerang: nyawa target -1, penyerang terpental ke kotak terjauh
+   - Jika nyawa habis (≤0), bidak hilang dari papan
+   - Jika Raja habis nyawa → game over
+
+   MODE PUASA:
+   - Semua bidak hanya bisa melangkah 1 kotak tanpa terkecuali
    ============================================= */
 
 'use strict';
@@ -25,6 +40,9 @@ const PIECE_SYMBOLS = {
     black: { K: '♚', Q: '♛', R: '♜', B: '♝', N: '♞', P: '♟' }
 };
 
+// PvP mode: HP per piece type
+const PVP_HP = { K: 20, Q: 15, R: 30, N: 13, B: 10, P: 3 };
+
 const OW_ROWS = 10;
 const OW_COLS = 12;
 
@@ -36,8 +54,10 @@ let gameState = {
     currentState: [],
     initialState: [],
     currentPlayer: 'white',
-    gameMode: null, // 'normal'|'gawaras'|'openworld'|'spektator'|'perang'
+    gameMode: null, // 'normal'|'gawaras'|'openworld'|'spektator'|'perang'|'custom'|'pvp'|'puasa'
     boardSize: 8,
+    boardCols: 8,  // for custom mode: independent col count
+    boardRows: 8,  // for custom mode: independent row count
     selectedCell: null,
     validMoves: [],
     lastMove: null,
@@ -47,8 +67,11 @@ let gameState = {
     camera: { row: 0, col: 0 },
     scrollInterval: null,
     boardRevealed: true,
-    // War mode: cells to flash this render cycle
-    warFlashCells: [], // [{ row, col, type }]  type: 'aoe'|'sweep'|'arc'
+    warFlashCells: [],
+    // Custom mode settings
+    customConfig: { cols: 8, rows: 8, coreMult: 1, pawnMult: 1 },
+    // PvP: HP map, key = "row,col" pointing to current HP
+    pvpHP: {},
 };
 
 // =============================================
@@ -59,9 +82,65 @@ function mkPiece(type, color) { return { type, color }; }
 
 function cloneBoard(b) { return b.map(r => r.map(c => c ? {...c } : null)); }
 
-function inBounds(r, c, size) { return r >= 0 && r < size && c >= 0 && c < size; }
+function inBounds(r, c, rows, cols) {
+    // Support both old (r,c,size) and new (r,c,rows,cols) signatures
+    if (cols === undefined) { cols = rows; } // backward compat
+    return r >= 0 && r < rows && c >= 0 && c < cols;
+}
 
 function isWar() { return gameState.gameMode === 'perang'; }
+function isPvP() { return gameState.gameMode === 'pvp'; }
+function isPuasa() { return gameState.gameMode === 'puasa'; }
+
+// Get board dimensions
+function getBoardDims() {
+    if (gameState.gameMode === 'custom') {
+        return { rows: gameState.boardRows, cols: gameState.boardCols };
+    }
+    return { rows: gameState.boardSize, cols: gameState.boardSize };
+}
+
+function inBoundsGs(r, c) {
+    const { rows, cols } = getBoardDims();
+    return r >= 0 && r < rows && c >= 0 && c < cols;
+}
+
+// =============================================
+// PvP HP HELPERS
+// =============================================
+
+function pvpKey(r, c) { return `${r},${c}`; }
+
+function pvpGetHP(r, c) {
+    const k = pvpKey(r, c);
+    return gameState.pvpHP[k] !== undefined ? gameState.pvpHP[k] : 0;
+}
+
+function pvpSetHP(r, c, hp) {
+    gameState.pvpHP[pvpKey(r, c)] = hp;
+}
+
+function pvpDeleteHP(r, c) {
+    delete gameState.pvpHP[pvpKey(r, c)];
+}
+
+function pvpMoveHP(fromR, fromC, toR, toC) {
+    const hp = pvpGetHP(fromR, fromC);
+    pvpDeleteHP(fromR, fromC);
+    pvpSetHP(toR, toC, hp);
+}
+
+// Initialize HP for a whole board
+function pvpInitHP(board) {
+    gameState.pvpHP = {};
+    const { rows, cols } = getBoardDims();
+    for (let r = 0; r < rows; r++) {
+        for (let c = 0; c < cols; c++) {
+            const p = board[r][c];
+            if (p) pvpSetHP(r, c, PVP_HP[p.type] || 1);
+        }
+    }
+}
 
 // =============================================
 // BOARD SETUP
@@ -90,6 +169,62 @@ function buildInitialBoard(size) {
     return board;
 }
 
+/**
+ * Build a custom board with given dimensions and piece multipliers.
+ * Core pieces (R,N,B,Q,K) are repeated coreMult times on back row(s).
+ * Pawns fill pawnMult rows.
+ */
+function buildCustomBoard(rows, cols, coreMult, pawnMult) {
+    const board = Array.from({ length: rows }, () => Array(cols).fill(null));
+    const baseBack = ['R', 'N', 'B', 'Q', 'K', 'B', 'N', 'R'];
+
+    // Build core pieces array repeated
+    let coreArr = [];
+    for (let i = 0; i < coreMult; i++) coreArr = coreArr.concat(baseBack);
+
+    // Place core pieces on back rows (fill as many rows as needed)
+    const placeBack = (color, startRow, direction) => {
+        let remaining = [...coreArr];
+        let rowOffset = 0;
+        while (remaining.length > 0) {
+            const rowIdx = startRow + rowOffset * direction;
+            if (rowIdx < 0 || rowIdx >= rows) break;
+            const toPlace = remaining.splice(0, cols);
+            for (let c = 0; c < toPlace.length; c++) {
+                board[rowIdx][c] = mkPiece(toPlace[c], color);
+            }
+            rowOffset++;
+        }
+        return rowOffset; // how many rows used
+    };
+
+    const blackCoreRows = placeBack('black', 0, 1);
+    const whiteCoreRows = placeBack('white', rows - 1, -1);
+
+    // Pawns: pawnMult total pawns per side = cols * pawnMult (spread into rows of cols)
+    const totalPawns = cols * pawnMult;
+    const pawnRowsNeeded = Math.ceil(totalPawns / cols);
+
+    const placePawns = (color, startRow, direction) => {
+        let placed = 0;
+        for (let pr = 0; pr < pawnRowsNeeded && placed < totalPawns; pr++) {
+            const rowIdx = startRow + pr * direction;
+            if (rowIdx < 0 || rowIdx >= rows) break;
+            for (let c = 0; c < cols && placed < totalPawns; c++) {
+                if (!board[rowIdx][c]) {
+                    board[rowIdx][c] = mkPiece('P', color);
+                    placed++;
+                }
+            }
+        }
+    };
+
+    placePawns('black', blackCoreRows, 1);
+    placePawns('white', rows - 1 - whiteCoreRows, -1);
+
+    return board;
+}
+
 // =============================================
 // MOVE GENERATION
 // =============================================
@@ -97,335 +232,354 @@ function buildInitialBoard(size) {
 /**
  * Pseudo-legal moves (ignore check legality).
  * In war mode, Rooks are immune to capture and King moves 2 steps.
+ * In puasa mode, all pieces can only move 1 square.
  */
-function getPseudoMoves(board, row, col, size) {
+function getPseudoMoves(board, row, col, sizeOrRows, cols) {
     const piece = board[row][col];
     if (!piece) return [];
     const moves = [];
     const { type, color } = piece;
     const opp = color === 'white' ? 'black' : 'white';
     const war = isWar();
+    const puasa = isPuasa();
+
+    // Determine board dimensions
+    let numRows, numCols;
+    if (cols !== undefined) {
+        numRows = sizeOrRows;
+        numCols = cols;
+    } else {
+        numRows = sizeOrRows;
+        numCols = sizeOrRows;
+    }
+
+    const ib = (r, c) => r >= 0 && r < numRows && c >= 0 && c < numCols;
 
     const slide = (dr, dc) => {
-        let r = row + dr,
-            c = col + dc;
-        while (inBounds(r, c, size)) {
+        let r = row + dr, c = col + dc;
+        // In puasa mode, only slide 1 step
+        const maxSteps = puasa ? 1 : Infinity;
+        let steps = 0;
+        while (ib(r, c) && steps < maxSteps) {
             const t = board[r][c];
             if (t) {
-                // War: Rooks are immune — cannot be captured
                 if (t.color === opp && !(war && t.type === 'R')) {
                     moves.push({ row: r, col: c, isCapture: true });
                 }
                 break;
             }
             moves.push({ row: r, col: c, isCapture: false });
-            r += dr;
-            c += dc;
+            r += dr; c += dc;
+            steps++;
         }
     };
 
     switch (type) {
-        case 'P':
-            {
-                const dir = color === 'white' ? -1 : 1;
-                const pawnStart = size === 8 ?
-                    (color === 'white' ? 6 : 1) :
-                    (color === 'white' ? 88 : 11);
-                const r1 = row + dir;
-                if (inBounds(r1, col, size) && !board[r1][col]) {
-                    moves.push({ row: r1, col, isCapture: false });
-                    const r2 = row + 2 * dir;
-                    if (row === pawnStart && inBounds(r2, col, size) && !board[r2][col])
-                        moves.push({ row: r2, col, isCapture: false });
-                }
-                for (const dc of[-1, 1]) {
-                    const rr = row + dir,
-                        cc = col + dc;
-                    if (!inBounds(rr, cc, size)) continue;
-                    const t = board[rr][cc];
-                    if (t && t.color === opp) {
-                        // War: Rooks immune from pawn capture too
-                        if (!(war && t.type === 'R'))
-                            moves.push({ row: rr, col: cc, isCapture: true });
-                    }
-                }
-                break;
+        case 'P': {
+            const dir = color === 'white' ? -1 : 1;
+            // Pawn start row — generalized
+            let pawnStart;
+            if (gameState.gameMode === 'openworld') {
+                pawnStart = color === 'white' ? 88 : 11;
+            } else if (gameState.gameMode === 'custom') {
+                // white pawn start: row just above white core rows
+                // Approximate: row = numRows - 1 - (coreRows) - (first pawn row offset)
+                // Just allow double move from initial state row
+                pawnStart = -1; // disable double move in custom for simplicity
+            } else {
+                pawnStart = color === 'white' ? 6 : 1;
             }
+            const r1 = row + dir;
+            if (ib(r1, col) && !board[r1][col]) {
+                moves.push({ row: r1, col, isCapture: false });
+                const r2 = row + 2 * dir;
+                if (!puasa && row === pawnStart && ib(r2, col) && !board[r2][col])
+                    moves.push({ row: r2, col, isCapture: false });
+            }
+            for (const dc of [-1, 1]) {
+                const rr = row + dir, cc = col + dc;
+                if (!ib(rr, cc)) continue;
+                const t = board[rr][cc];
+                if (t && t.color === opp) {
+                    if (!(war && t.type === 'R'))
+                        moves.push({ row: rr, col: cc, isCapture: true });
+                }
+            }
+            break;
+        }
         case 'R':
-            slide(-1, 0);
-            slide(1, 0);
-            slide(0, -1);
-            slide(0, 1);
+            slide(-1, 0); slide(1, 0); slide(0, -1); slide(0, 1);
             break;
         case 'B':
-            slide(-1, -1);
-            slide(-1, 1);
-            slide(1, -1);
-            slide(1, 1);
+            slide(-1, -1); slide(-1, 1); slide(1, -1); slide(1, 1);
             break;
         case 'Q':
-            slide(-1, 0);
-            slide(1, 0);
-            slide(0, -1);
-            slide(0, 1);
-            slide(-1, -1);
-            slide(-1, 1);
-            slide(1, -1);
-            slide(1, 1);
+            slide(-1, 0); slide(1, 0); slide(0, -1); slide(0, 1);
+            slide(-1, -1); slide(-1, 1); slide(1, -1); slide(1, 1);
             break;
-        case 'N':
-            {
-                const jumps = [
-                    [-2, -1],
-                    [-2, 1],
-                    [-1, -2],
-                    [-1, 2],
-                    [1, -2],
-                    [1, 2],
-                    [2, -1],
-                    [2, 1]
-                ];
-                for (const [dr, dc] of jumps) {
-                    const r = row + dr,
-                        c = col + dc;
-                    if (!inBounds(r, c, size)) continue;
-                    const t = board[r][c];
-                    if (!t) {
-                        moves.push({ row: r, col: c, isCapture: false });
-                    } else if (t.color === opp) {
-                        // War: Rooks immune
-                        if (!(war && t.type === 'R'))
+        case 'N': {
+            if (puasa) {
+                // In puasa mode, knight also moves only 1 square (like a king)
+                for (let dr = -1; dr <= 1; dr++) {
+                    for (let dc = -1; dc <= 1; dc++) {
+                        if (!dr && !dc) continue;
+                        const r = row + dr, c = col + dc;
+                        if (!ib(r, c)) continue;
+                        const t = board[r][c];
+                        if (!t) moves.push({ row: r, col: c, isCapture: false });
+                        else if (t.color === opp && !(war && t.type === 'R'))
                             moves.push({ row: r, col: c, isCapture: true });
                     }
                 }
-                break;
+            } else {
+                const jumps = [[-2,-1],[-2,1],[-1,-2],[-1,2],[1,-2],[1,2],[2,-1],[2,1]];
+                for (const [dr, dc] of jumps) {
+                    const r = row + dr, c = col + dc;
+                    if (!ib(r, c)) continue;
+                    const t = board[r][c];
+                    if (!t) moves.push({ row: r, col: c, isCapture: false });
+                    else if (t.color === opp && !(war && t.type === 'R'))
+                        moves.push({ row: r, col: c, isCapture: true });
+                }
             }
-        case 'K':
-            {
-                // War mode: King can move up to 2 steps (any direction)
-                const maxSteps = war ? 2 : 1;
-                const added = new Set();
-                for (let dr = -maxSteps; dr <= maxSteps; dr++) {
-                    for (let dc = -maxSteps; dc <= maxSteps; dc++) {
-                        if (!dr && !dc) continue;
-                        // For 2-step: must actually be within Manhattan-like range but not exceed maxSteps
-                        if (Math.abs(dr) > maxSteps || Math.abs(dc) > maxSteps) continue;
-                        const r = row + dr,
-                            c = col + dc;
-                        if (!inBounds(r, c, size)) continue;
-                        const key = `${r},${c}`;
-                        if (added.has(key)) continue;
-                        // For war 2-step: check path isn't blocked (it's a sliding king)
-                        // Simplified: check intermediate cell isn't blocking (only for pure horizontal/vertical/diagonal 2-step)
-                        if (war && (Math.abs(dr) === 2 || Math.abs(dc) === 2)) {
-                            const mr = row + Math.sign(dr),
-                                mc = col + Math.sign(dc);
-                            if (inBounds(mr, mc, size) && board[mr][mc] && board[mr][mc].color === color) continue;
-                        }
-                        const t = board[r][c];
-                        if (!t) {
-                            moves.push({ row: r, col: c, isCapture: false });
-                            added.add(key);
-                        } else if (t.color === opp) {
-                            if (!(war && t.type === 'R'))
-                                moves.push({ row: r, col: c, isCapture: true });
-                            added.add(key);
-                        }
+            break;
+        }
+        case 'K': {
+            const maxSteps = war ? 2 : 1;
+            const added = new Set();
+            for (let dr = -maxSteps; dr <= maxSteps; dr++) {
+                for (let dc = -maxSteps; dc <= maxSteps; dc++) {
+                    if (!dr && !dc) continue;
+                    if (Math.abs(dr) > maxSteps || Math.abs(dc) > maxSteps) continue;
+                    const r = row + dr, c = col + dc;
+                    if (!ib(r, c)) continue;
+                    const key = `${r},${c}`;
+                    if (added.has(key)) continue;
+                    if (war && (Math.abs(dr) === 2 || Math.abs(dc) === 2)) {
+                        const mr = row + Math.sign(dr), mc = col + Math.sign(dc);
+                        if (ib(mr, mc) && board[mr][mc] && board[mr][mc].color === color) continue;
+                    }
+                    const t = board[r][c];
+                    if (!t) { moves.push({ row: r, col: c, isCapture: false }); added.add(key); }
+                    else if (t.color === opp) {
+                        if (!(war && t.type === 'R')) { moves.push({ row: r, col: c, isCapture: true }); added.add(key); }
                     }
                 }
-                break;
             }
+            break;
+        }
     }
     return moves;
 }
 
 // =============================================
-// CHECK DETECTION (uses standard 1-step king range for attack calc)
+// CHECK DETECTION
 // =============================================
 
-function isKingAttacked(board, color, size) {
-    let kr = -1,
-        kc = -1;
-    outer: for (let r = 0; r < size; r++)
-        for (let c = 0; c < size; c++) {
+function isKingAttacked(board, color, numRows, numCols) {
+    if (numCols === undefined) numCols = numRows;
+    let kr = -1, kc = -1;
+    outer: for (let r = 0; r < numRows; r++)
+        for (let c = 0; c < numCols; c++) {
             const p = board[r][c];
-            if (p && p.type === 'K' && p.color === color) { kr = r;
-                kc = c; break outer; }
+            if (p && p.type === 'K' && p.color === color) { kr = r; kc = c; break outer; }
         }
     if (kr < 0) return false;
 
     const opp = color === 'white' ? 'black' : 'white';
-    for (let r = 0; r < size; r++)
-        for (let c = 0; c < size; c++) {
+    for (let r = 0; r < numRows; r++)
+        for (let c = 0; c < numCols; c++) {
             const p = board[r][c];
             if (!p || p.color !== opp) continue;
-            if (getPseudoMoves(board, r, c, size).some(m => m.row === kr && m.col === kc))
+            if (getPseudoMoves(board, r, c, numRows, numCols).some(m => m.row === kr && m.col === kc))
                 return true;
         }
     return false;
 }
 
-function getValidMoves(board, row, col, size) {
+function getValidMoves(board, row, col, numRows, numCols) {
+    if (numCols === undefined) numCols = numRows;
     const piece = board[row][col];
     if (!piece) return [];
+
+    // PvP mode: capture moves are handled differently (no need to filter by check for captures)
+    // But still need to prevent moves that leave king in check
     const legal = [];
-    for (const move of getPseudoMoves(board, row, col, size)) {
+    for (const move of getPseudoMoves(board, row, col, numRows, numCols)) {
         const tb = cloneBoard(board);
         tb[move.row][move.col] = tb[row][col];
         tb[row][col] = null;
-        if (!isKingAttacked(tb, piece.color, size)) legal.push(move);
+        if (!isKingAttacked(tb, piece.color, numRows, numCols)) legal.push(move);
     }
     return legal;
 }
 
-function hasLegalMoves(board, color, size) {
-    for (let r = 0; r < size; r++)
-        for (let c = 0; c < size; c++) {
+function hasLegalMoves(board, color, numRows, numCols) {
+    if (numCols === undefined) numCols = numRows;
+    for (let r = 0; r < numRows; r++)
+        for (let c = 0; c < numCols; c++) {
             const p = board[r][c];
             if (!p || p.color !== color) continue;
-            if (getValidMoves(board, r, c, size).length > 0) return true;
+            if (getValidMoves(board, r, c, numRows, numCols).length > 0) return true;
         }
     return false;
 }
 
-function evaluateState(board, color, size) {
-    const attacked = isKingAttacked(board, color, size);
-    const hasMove = hasLegalMoves(board, color, size);
+function evaluateState(board, color, numRows, numCols) {
+    if (numCols === undefined) numCols = numRows;
+    const attacked = isKingAttacked(board, color, numRows, numCols);
+    const hasMove = hasLegalMoves(board, color, numRows, numCols);
     if (attacked && !hasMove) return 'checkmate';
     if (!attacked && !hasMove) return 'stalemate';
     if (attacked) return 'check';
     return null;
 }
 
-function findKing(board, color, size) {
-    for (let r = 0; r < size; r++)
-        for (let c = 0; c < size; c++) {
+function findKing(board, color, numRows, numCols) {
+    if (numCols === undefined) numCols = numRows;
+    for (let r = 0; r < numRows; r++)
+        for (let c = 0; c < numCols; c++) {
             const p = board[r][c];
             if (p && p.type === 'K' && p.color === color) return { row: r, col: c };
         }
     return null;
 }
 
+// Custom mode: check if all kings of a color are gone
+function allKingsGone(board, color, numRows, numCols) {
+    if (numCols === undefined) numCols = numRows;
+    for (let r = 0; r < numRows; r++)
+        for (let c = 0; c < numCols; c++) {
+            const p = board[r][c];
+            if (p && p.type === 'K' && p.color === color) return false;
+        }
+    return true;
+}
+
 // =============================================
 // WAR MODE: SPECIAL AFTER-MOVE EFFECTS
 // =============================================
 
-/**
- * Apply war-mode side effects after a piece lands at (toRow, toCol).
- * Returns array of { row, col, type } for flash animation.
- * `dr` and `dc` = direction the piece moved (fromRow→toRow etc.)
- */
-function applyWarEffects(board, piece, fromRow, fromCol, toRow, toCol, size) {
+function applyWarEffects(board, piece, fromRow, fromCol, toRow, toCol, numRows, numCols) {
+    if (numCols === undefined) numCols = numRows;
     if (!isWar()) return [];
     const opp = piece.color === 'white' ? 'black' : 'white';
     const flashCells = [];
+    const ib = (r, c) => r >= 0 && r < numRows && c >= 0 && c < numCols;
 
     switch (piece.type) {
-        // ── KNIGHT: AOE radius 1 around landing square ──
-        case 'N':
-            {
-                for (let dr = -1; dr <= 1; dr++) {
-                    for (let dc = -1; dc <= 1; dc++) {
-                        if (!dr && !dc) continue; // skip landing cell itself
-                        const r = toRow + dr,
-                            c = toCol + dc;
-                        if (!inBounds(r, c, size)) continue;
-                        const t = board[r][c];
-                        if (t && t.color === opp && t.type !== 'R') { // Rooks immune
-                            board[r][c] = null;
-                            flashCells.push({ row: r, col: c, flashType: 'aoe' });
-                        } else if (!t) {
-                            flashCells.push({ row: r, col: c, flashType: 'aoe' });
-                        }
-                    }
-                }
-                break;
-            }
-
-            // ── BISHOP: sweep 2 forward-diagonal cells in direction of travel ──
-        case 'B':
-            {
-                // Direction of bishop's travel
-                const dr = toRow > fromRow ? 1 : -1;
-                const dc = toCol > fromCol ? 1 : -1;
-                // Two "forward" diagonals from landing position (continue same diagonal, and the other forward one)
-                const sweepDirs = [
-                    [dr, dc], // straight ahead (same diagonal)
-                    [dr, -dc], // forward but other diagonal
-                ];
-                for (const [sdr, sdc] of sweepDirs) {
-                    // Sweep 1 step ahead only (immediate next cell)
-                    const r = toRow + sdr,
-                        c = toCol + sdc;
-                    if (!inBounds(r, c, size)) continue;
+        case 'N': {
+            for (let dr = -1; dr <= 1; dr++) {
+                for (let dc = -1; dc <= 1; dc++) {
+                    if (!dr && !dc) continue;
+                    const r = toRow + dr, c = toCol + dc;
+                    if (!ib(r, c)) continue;
                     const t = board[r][c];
                     if (t && t.color === opp && t.type !== 'R') {
                         board[r][c] = null;
-                        flashCells.push({ row: r, col: c, flashType: 'sweep' });
-                    } else {
-                        flashCells.push({ row: r, col: c, flashType: 'sweep' });
+                        flashCells.push({ row: r, col: c, flashType: 'aoe' });
+                    } else if (!t) {
+                        flashCells.push({ row: r, col: c, flashType: 'aoe' });
                     }
                 }
-                break;
             }
-
-            // ── QUEEN: shoot 3 cells in front arc from landing position ──
-        case 'Q':
-            {
-                // Determine "forward" direction: the direction the queen moved
-                const rawDr = toRow - fromRow;
-                const rawDc = toCol - fromCol;
-                // Normalize to unit vector
-                const dr = rawDr === 0 ? 0 : (rawDr > 0 ? 1 : -1);
-                const dc = rawDc === 0 ? 0 : (rawDc > 0 ? 1 : -1);
-
-                // 3 arc cells: straight ahead, diagonal left, diagonal right
-                // "Left" and "right" relative to movement direction
-                let arcDirs;
-                if (dr !== 0 && dc !== 0) {
-                    // Moving diagonally: arc is straight-dr, straight-dc, and the diagonal
-                    arcDirs = [
-                        [dr, dc], // straight ahead
-                        [dr, 0], // same row advance, no col change
-                        [0, dc], // same col advance, no row change
-                    ];
-                } else if (dr !== 0) {
-                    // Moving vertically
-                    arcDirs = [
-                        [dr, -1],
-                        [dr, 0],
-                        [dr, 1],
-                    ];
+            break;
+        }
+        case 'B': {
+            const dr = toRow > fromRow ? 1 : -1;
+            const dc = toCol > fromCol ? 1 : -1;
+            const sweepDirs = [[dr, dc], [dr, -dc]];
+            for (const [sdr, sdc] of sweepDirs) {
+                const r = toRow + sdr, c = toCol + sdc;
+                if (!ib(r, c)) continue;
+                const t = board[r][c];
+                if (t && t.color === opp && t.type !== 'R') {
+                    board[r][c] = null;
+                    flashCells.push({ row: r, col: c, flashType: 'sweep' });
                 } else {
-                    // Moving horizontally
-                    arcDirs = [
-                        [-1, dc],
-                        [0, dc],
-                        [1, dc],
-                    ];
+                    flashCells.push({ row: r, col: c, flashType: 'sweep' });
                 }
-
-                for (const [adr, adc] of arcDirs) {
-                    const r = toRow + adr,
-                        c = toCol + adc;
-                    if (!inBounds(r, c, size)) continue;
-                    const t = board[r][c];
-                    if (t && t.color === opp && t.type !== 'R') {
-                        board[r][c] = null;
-                        flashCells.push({ row: r, col: c, flashType: 'arc' });
-                    } else {
-                        flashCells.push({ row: r, col: c, flashType: 'arc' });
-                    }
-                }
-                break;
             }
-
-            // Rook (immune, no special attack), Pawn, King: no AOE effect
+            break;
+        }
+        case 'Q': {
+            const rawDr = toRow - fromRow;
+            const rawDc = toCol - fromCol;
+            const dr = rawDr === 0 ? 0 : (rawDr > 0 ? 1 : -1);
+            const dc = rawDc === 0 ? 0 : (rawDc > 0 ? 1 : -1);
+            let arcDirs;
+            if (dr !== 0 && dc !== 0) {
+                arcDirs = [[dr, dc], [dr, 0], [0, dc]];
+            } else if (dr !== 0) {
+                arcDirs = [[dr, -1], [dr, 0], [dr, 1]];
+            } else {
+                arcDirs = [[-1, dc], [0, dc], [1, dc]];
+            }
+            for (const [adr, adc] of arcDirs) {
+                const r = toRow + adr, c = toCol + adc;
+                if (!ib(r, c)) continue;
+                const t = board[r][c];
+                if (t && t.color === opp && t.type !== 'R') {
+                    board[r][c] = null;
+                    flashCells.push({ row: r, col: c, flashType: 'arc' });
+                } else {
+                    flashCells.push({ row: r, col: c, flashType: 'arc' });
+                }
+            }
+            break;
+        }
         default:
             break;
     }
-
     return flashCells;
+}
+
+// =============================================
+// PvP MODE: BOUNCE LOGIC
+// =============================================
+
+/**
+ * Find the farthest empty cell for the bouncing attacker.
+ * The attacker at (fromRow,fromCol) attacked (toRow,toCol) but target survived.
+ * Attacker is hurled away from the target (opposite direction).
+ *
+ * We clear the attacker's origin cell conceptually during the scan so it
+ * doesn't block its own bounce path.
+ */
+function findBounceDest(board, fromRow, fromCol, toRow, toCol, numRows, numCols) {
+    if (numCols === undefined) numCols = numRows;
+    const ib = (r, c) => r >= 0 && r < numRows && c >= 0 && c < numCols;
+
+    // Unit direction away from target
+    const rawR = fromRow - toRow;
+    const rawC = fromCol - toCol;
+    const normR = rawR === 0 ? 0 : (rawR > 0 ? 1 : -1);
+    const normC = rawC === 0 ? 0 : (rawC > 0 ? 1 : -1);
+
+    // Guard: no direction (shouldn't happen)
+    if (normR === 0 && normC === 0) return { row: fromRow, col: fromCol };
+
+    // Scan starting from the cell BEYOND fromRow,fromCol (the attacker's own
+    // square is vacated during bounce, so skip it and search further out).
+    let bestR = fromRow;
+    let bestC = fromCol;
+    let r = fromRow + normR;
+    let c = fromCol + normC;
+
+    while (ib(r, c)) {
+        // Treat the attacker's own origin cell as empty (it's leaving)
+        const cellContent = (r === fromRow && c === fromCol) ? null : board[r][c];
+        if (!cellContent) {
+            bestR = r;
+            bestC = c;
+        } else {
+            break;
+        }
+        r += normR;
+        c += normC;
+    }
+
+    return { row: bestR, col: bestC };
 }
 
 // =============================================
@@ -434,7 +588,7 @@ function applyWarEffects(board, piece, fromRow, fromCol, toRow, toCol, size) {
 
 function findRespawnPosition(piece) {
     const board = gameState.currentState;
-    const size = gameState.boardSize;
+    const { rows, cols } = getBoardDims();
     const init = gameState.initialState;
     const candidates = [];
 
@@ -457,10 +611,9 @@ function findRespawnPosition(piece) {
         if (visited.has(key)) continue;
         visited.add(key);
         if (!board[row][col]) return { row, col };
-        for (const [dr, dc] of[[-1, 0], [1, 0], [0, -1], [0, 1]]) {
-            const nr = row + dr,
-                nc = col + dc;
-            if (inBounds(nr, nc, size) && !visited.has(`${nr},${nc}`))
+        for (const [dr, dc] of [[-1,0],[1,0],[0,-1],[0,1]]) {
+            const nr = row + dr, nc = col + dc;
+            if (nr >= 0 && nr < rows && nc >= 0 && nc < cols && !visited.has(`${nr},${nc}`))
                 queue.push({ row: nr, col: nc });
         }
     }
@@ -472,11 +625,23 @@ function findRespawnPosition(piece) {
 // =============================================
 
 function initGame(mode) {
-    const size = mode === 'openworld' ? 100 : 8;
+    let size, rows, cols;
+
+    if (mode === 'openworld') {
+        size = 100; rows = 100; cols = 100;
+    } else if (mode === 'custom') {
+        const cfg = gameState.customConfig;
+        rows = cfg.rows; cols = cfg.cols; size = Math.max(rows, cols);
+    } else {
+        size = 8; rows = 8; cols = 8;
+    }
+
     const sc = Math.floor((size - OW_COLS) / 2);
 
     gameState.gameMode = mode;
     gameState.boardSize = size;
+    gameState.boardRows = rows;
+    gameState.boardCols = cols;
     gameState.currentPlayer = 'white';
     gameState.selectedCell = null;
     gameState.validMoves = [];
@@ -486,14 +651,25 @@ function initGame(mode) {
     gameState.checkPos = null;
     gameState.boardRevealed = true;
     gameState.warFlashCells = [];
+    gameState.pvpHP = {};
     gameState.camera = {
         row: mode === 'openworld' ? 83 : 0,
         col: mode === 'openworld' ? Math.max(0, sc) : 0
     };
 
-    const initial = buildInitialBoard(size);
+    let initial;
+    if (mode === 'custom') {
+        const cfg = gameState.customConfig;
+        initial = buildCustomBoard(rows, cols, cfg.coreMult, cfg.pawnMult);
+    } else {
+        initial = buildInitialBoard(size);
+    }
     gameState.initialState = cloneBoard(initial);
     gameState.currentState = cloneBoard(initial);
+
+    if (mode === 'pvp') {
+        pvpInitHP(gameState.currentState);
+    }
 
     renderBoard();
     updateTurnIndicator();
@@ -509,6 +685,8 @@ function renderBoard() {
     const {
         currentState,
         boardSize,
+        boardRows,
+        boardCols,
         gameMode,
         camera,
         selectedCell,
@@ -520,6 +698,10 @@ function renderBoard() {
         warFlashCells
     } = gameState;
     const war = gameMode === 'perang';
+    const pvp = gameMode === 'pvp';
+
+    const numRows = (gameMode === 'custom') ? boardRows : boardSize;
+    const numCols = (gameMode === 'custom') ? boardCols : boardSize;
 
     // Viewport
     let startRow, startCol, visRows, visCols;
@@ -533,8 +715,8 @@ function renderBoard() {
     } else {
         startRow = 0;
         startCol = 0;
-        visRows = boardSize;
-        visCols = boardSize;
+        visRows = numRows;
+        visCols = numCols;
     }
 
     // Cell size to fill wrapper
@@ -551,10 +733,8 @@ function renderBoard() {
 
     const fontSize = Math.max(10, Math.floor(cellSize * 0.7));
 
-    // Build lookup sets
     const validSet = new Set(validMoves.map(m => `${m.row},${m.col}`));
     const captureSet = new Set(validMoves.filter(m => m.isCapture).map(m => `${m.row},${m.col}`));
-    // War flash: build map key → flashType
     const flashMap = new Map(warFlashCells.map(f => [`${f.row},${f.col}`, f.flashType]));
 
     const frag = document.createDocumentFragment();
@@ -570,7 +750,6 @@ function renderBoard() {
 
             if (selectedCell && selectedCell.row === r && selectedCell.col === c) cls += ' selected';
 
-            // Valid move highlight — use war style if war mode
             if (captureSet.has(key)) cls += ' valid-capture';
             else if (validSet.has(key)) cls += (war ? ' war-valid-move' : ' valid-move');
 
@@ -581,7 +760,6 @@ function renderBoard() {
 
             if (checkPos && checkPos.row === r && checkPos.col === c) cls += ' in-check';
 
-            // War flash cells
             if (flashMap.has(key)) {
                 const ft = flashMap.get(key);
                 if (ft === 'aoe') cls += ' war-aoe';
@@ -589,7 +767,6 @@ function renderBoard() {
                 if (ft === 'arc') cls += ' war-arc';
             }
 
-            // War: rook immune overlay marker
             if (war && piece && piece.type === 'R') cls += ' immune-rook';
 
             cellEl.className = cls;
@@ -610,6 +787,30 @@ function renderBoard() {
                 if (gameMode === 'spektator' && (!boardRevealed || piece.color !== currentPlayer))
                     pieceEl.classList.add('hidden-piece');
 
+                // PvP: show HP bar
+                if (pvp) {
+                    const hp = pvpGetHP(r, c);
+                    const maxHp = PVP_HP[piece.type] || 1;
+                    const pct = Math.max(0, Math.min(100, (hp / maxHp) * 100));
+                    const hpBar = document.createElement('div');
+                    hpBar.className = 'pvp-hp-bar';
+                    const hpFill = document.createElement('div');
+                    hpFill.className = 'pvp-hp-fill';
+                    hpFill.style.width = pct + '%';
+                    // Color based on HP
+                    if (pct > 60) hpFill.style.background = '#00FF88';
+                    else if (pct > 30) hpFill.style.background = '#FFB700';
+                    else hpFill.style.background = '#FF4560';
+                    hpBar.appendChild(hpFill);
+
+                    const hpText = document.createElement('div');
+                    hpText.className = 'pvp-hp-text';
+                    hpText.textContent = hp;
+
+                    pieceEl.appendChild(hpBar);
+                    pieceEl.appendChild(hpText);
+                }
+
                 cellEl.appendChild(pieceEl);
             }
 
@@ -625,10 +826,8 @@ function renderBoard() {
         if (el) el.textContent = `${startCol},${startRow}`;
     }
 
-    // Clear flash cells after one render cycle
     if (warFlashCells.length > 0) {
-        setTimeout(() => { gameState.warFlashCells = [];
-            renderBoard(); }, 500);
+        setTimeout(() => { gameState.warFlashCells = []; renderBoard(); }, 500);
     }
 }
 
@@ -657,8 +856,11 @@ function onCellClick(e) {
 }
 
 function selectPiece(row, col) {
+    const { boardRows, boardCols, boardSize, gameMode } = gameState;
+    const numRows = gameMode === 'custom' ? boardRows : boardSize;
+    const numCols = gameMode === 'custom' ? boardCols : boardSize;
     gameState.selectedCell = { row, col };
-    gameState.validMoves = getValidMoves(gameState.currentState, row, col, gameState.boardSize);
+    gameState.validMoves = getValidMoves(gameState.currentState, row, col, numRows, numCols);
     renderBoard();
 }
 
@@ -675,20 +877,94 @@ function deselectPiece() {
 function movePiece(fromRow, fromCol, toRow, toCol) {
     const board = gameState.currentState;
     const mode = gameState.gameMode;
-    const size = gameState.boardSize;
+    const { boardRows, boardCols, boardSize } = gameState;
+    const numRows = mode === 'custom' ? boardRows : boardSize;
+    const numCols = mode === 'custom' ? boardCols : boardSize;
     const war = mode === 'perang';
+    const pvp = mode === 'pvp';
+    const custom = mode === 'custom';
 
     const moving = board[fromRow][fromCol];
-    const captured = board[toRow][toCol] ? {...board[toRow][toCol] } : null;
+    const captured = board[toRow][toCol] ? {...board[toRow][toCol]} : null;
 
-    // Move the piece
-    board[toRow][toCol] = moving;
-    board[fromRow][fromCol] = null;
+    // ── PvP MODE: special capture / bounce logic ──
+    if (pvp && captured) {
+        // Reduce target HP by 1
+        const targetHP = pvpGetHP(toRow, toCol) - 1;
+
+        if (targetHP <= 0) {
+            // Target dies: remove it
+            pvpDeleteHP(toRow, toCol);
+            board[toRow][toCol] = null;
+
+            // Check if a King died
+            if (captured.type === 'K') {
+                // Move attacker in
+                board[toRow][toCol] = moving;
+                pvpMoveHP(fromRow, fromCol, toRow, toCol);
+                board[fromRow][fromCol] = null;
+
+                gameState.lastMove = { from: { row: fromRow, col: fromCol }, to: { row: toRow, col: toCol } };
+                gameState.selectedCell = null;
+                gameState.validMoves = [];
+                renderBoard();
+                updateCheckAlert('checkmate');
+                setTimeout(() => showGameOver(gameState.currentPlayer), 900);
+                gameState.gameOver = true;
+                return;
+            }
+
+            // Attacker moves in normally
+            board[toRow][toCol] = moving;
+            pvpMoveHP(fromRow, fromCol, toRow, toCol);
+            board[fromRow][fromCol] = null;
+        } else {
+            // Target survives: update HP
+            pvpSetHP(toRow, toCol, targetHP);
+
+            // Calculate bounce BEFORE modifying the board.
+            // board[fromRow][fromCol] still holds the attacker so scan is accurate.
+            const bounce = findBounceDest(board, fromRow, fromCol, toRow, toCol, numRows, numCols);
+
+            // Move attacker on the board
+            if (bounce.row === fromRow && bounce.col === fromCol) {
+                // No free cell found — attacker stays put (already in correct cell)
+                // Nothing to do; board is unchanged for the attacker
+            } else {
+                board[bounce.row][bounce.col] = moving;
+                board[fromRow][fromCol] = null;
+                pvpMoveHP(fromRow, fromCol, bounce.row, bounce.col);
+            }
+
+            gameState.lastMove = { from: { row: fromRow, col: fromCol }, to: { row: bounce.row, col: bounce.col } };
+            gameState.selectedCell = null;
+            gameState.validMoves = [];
+
+            // Show bounce alert
+            updateCheckAlert('pvp-bounce');
+            renderBoard();
+            animatePieceMove(bounce.row, bounce.col);
+            switchTurn();
+            return;
+        }
+    } else {
+        // Normal move (no PvP special handling)
+        board[toRow][toCol] = moving;
+        board[fromRow][fromCol] = null;
+        // PvP: carry HP to new position (no HP change — just moving)
+        if (pvp) pvpMoveHP(fromRow, fromCol, toRow, toCol);
+    }
 
     // Pawn promotion → Queen
     if (moving.type === 'P') {
-        if (moving.color === 'white' && toRow === 0) board[toRow][toCol] = mkPiece('Q', 'white');
-        if (moving.color === 'black' && toRow === size - 1) board[toRow][toCol] = mkPiece('Q', 'black');
+        if (moving.color === 'white' && toRow === 0) {
+            board[toRow][toCol] = mkPiece('Q', 'white');
+            if (pvp) pvpSetHP(toRow, toCol, PVP_HP['Q']);
+        }
+        if (moving.color === 'black' && toRow === numRows - 1) {
+            board[toRow][toCol] = mkPiece('Q', 'black');
+            if (pvp) pvpSetHP(toRow, toCol, PVP_HP['Q']);
+        }
     }
 
     gameState.lastMove = { from: { row: fromRow, col: fromCol }, to: { row: toRow, col: toCol } };
@@ -702,12 +978,11 @@ function movePiece(fromRow, fromCol, toRow, toCol) {
     // ── WAR MODE: apply special effects ──
     let warFlash = [];
     if (war) {
-        warFlash = applyWarEffects(board, moving, fromRow, fromCol, toRow, toCol, size);
+        warFlash = applyWarEffects(board, moving, fromRow, fromCol, toRow, toCol, numRows, numCols);
         gameState.warFlashCells = warFlash;
 
-        // If any flash cells removed a king (very unlikely but handle it)
         const oppColor = moving.color === 'white' ? 'black' : 'white';
-        if (!findKing(board, oppColor, size)) {
+        if (!findKing(board, oppColor, numRows, numCols)) {
             renderBoard();
             updateCheckAlert('checkmate');
             setTimeout(() => showGameOver(moving.color), 600);
@@ -718,13 +993,51 @@ function movePiece(fromRow, fromCol, toRow, toCol) {
         gameState.warFlashCells = [];
     }
 
-    // Evaluate state for OPPONENT
+    // ── CUSTOM MODE: win condition = all enemy kings gone ──
+    if (custom) {
+        const oppColor = moving.color === 'white' ? 'black' : 'white';
+        if (allKingsGone(board, oppColor, numRows, numCols)) {
+            renderBoard();
+            animatePieceMove(toRow, toCol);
+            updateCheckAlert('checkmate');
+            setTimeout(() => showGameOver(moving.color), 900);
+            gameState.gameOver = true;
+            return;
+        }
+        // In custom mode skip standard check/stalemate for simplicity (multiple kings complicate it)
+        renderBoard();
+        animatePieceMove(toRow, toCol);
+        updateCheckAlert(null);
+        switchTurn();
+        return;
+    }
+
+    // ── PvP MODE: win condition = King is dead (handled above) or no kings left ──
+    if (pvp) {
+        const oppColor = moving.color === 'white' ? 'black' : 'white';
+        if (!findKing(board, oppColor, numRows, numCols)) {
+            renderBoard();
+            animatePieceMove(toRow, toCol);
+            updateCheckAlert('checkmate');
+            setTimeout(() => showGameOver(moving.color), 900);
+            gameState.gameOver = true;
+            return;
+        }
+        // No check detection in PvP (HP mechanic replaces it)
+        renderBoard();
+        animatePieceMove(toRow, toCol);
+        updateCheckAlert(null);
+        switchTurn();
+        return;
+    }
+
+    // Standard evaluate
     const opp = gameState.currentPlayer === 'white' ? 'black' : 'white';
-    const status = evaluateState(board, opp, size);
+    const status = evaluateState(board, opp, numRows, numCols);
 
     if (status === 'checkmate') {
         gameState.inCheck = true;
-        gameState.checkPos = findKing(board, opp, size);
+        gameState.checkPos = findKing(board, opp, numRows, numCols);
         renderBoard();
         animatePieceMove(toRow, toCol);
         updateCheckAlert('checkmate');
@@ -744,7 +1057,7 @@ function movePiece(fromRow, fromCol, toRow, toCol) {
     }
     if (status === 'check') {
         gameState.inCheck = true;
-        gameState.checkPos = findKing(board, opp, size);
+        gameState.checkPos = findKing(board, opp, numRows, numCols);
     } else {
         gameState.inCheck = false;
         gameState.checkPos = null;
@@ -792,7 +1105,7 @@ function updateCheckAlert(status) {
 
     if (!status) {
         el.classList.add('hidden');
-        el.classList.remove('checkmate', 'war-event');
+        el.classList.remove('checkmate', 'war-event', 'pvp-event');
         return;
     }
     el.classList.remove('hidden');
@@ -800,15 +1113,25 @@ function updateCheckAlert(status) {
     const oppName = gameState.currentPlayer === 'white' ? 'HITAM' : 'PUTIH';
 
     if (status === 'check') {
-        el.classList.remove('checkmate', 'war-event');
+        el.classList.remove('checkmate', 'war-event', 'pvp-event');
         textEl.textContent = `⚠ SKAK! Raja ${oppName} terancam!`;
     } else if (status === 'checkmate') {
         el.classList.add('checkmate');
-        el.classList.remove('war-event');
+        el.classList.remove('war-event', 'pvp-event');
         textEl.textContent = `☠ SKAKMAT! Raja ${oppName} tidak bisa lari!`;
     } else if (status === 'stalemate') {
-        el.classList.remove('checkmate', 'war-event');
+        el.classList.remove('checkmate', 'war-event', 'pvp-event');
         textEl.textContent = `🤝 STALEMATE! Permainan berakhir seri!`;
+    } else if (status === 'war-event') {
+        el.classList.add('war-event');
+        el.classList.remove('checkmate', 'pvp-event');
+        textEl.textContent = `💥 EFEK PERANG!`;
+    } else if (status === 'pvp-bounce') {
+        el.classList.add('pvp-event');
+        el.classList.remove('checkmate', 'war-event');
+        textEl.textContent = `🏓 BIDAK TERPENTAL! Target hanya kehilangan 1 nyawa!`;
+        // Auto-hide after 2s
+        setTimeout(() => updateCheckAlert(null), 2000);
     }
 }
 
@@ -885,18 +1208,10 @@ function respawnPiece(piece) {
 function scrollCamera(dir) {
     const { boardSize } = gameState;
     switch (dir) {
-        case 'up':
-            gameState.camera.row = Math.max(0, gameState.camera.row - 1);
-            break;
-        case 'down':
-            gameState.camera.row = Math.min(boardSize - OW_ROWS, gameState.camera.row + 1);
-            break;
-        case 'left':
-            gameState.camera.col = Math.max(0, gameState.camera.col - 1);
-            break;
-        case 'right':
-            gameState.camera.col = Math.min(boardSize - OW_COLS, gameState.camera.col + 1);
-            break;
+        case 'up': gameState.camera.row = Math.max(0, gameState.camera.row - 1); break;
+        case 'down': gameState.camera.row = Math.min(boardSize - OW_ROWS, gameState.camera.row + 1); break;
+        case 'left': gameState.camera.col = Math.max(0, gameState.camera.col - 1); break;
+        case 'right': gameState.camera.col = Math.min(boardSize - OW_COLS, gameState.camera.col + 1); break;
     }
     renderBoard();
 }
@@ -908,8 +1223,7 @@ function startScroll(dir) {
 }
 
 function stopScroll() {
-    if (gameState.scrollInterval) { clearInterval(gameState.scrollInterval);
-        gameState.scrollInterval = null; }
+    if (gameState.scrollInterval) { clearInterval(gameState.scrollInterval); gameState.scrollInterval = null; }
 }
 
 function centerCamera() {
@@ -931,8 +1245,7 @@ function centerCamera() {
 // =============================================
 
 (function() {
-    let tx0 = 0,
-        ty0 = 0;
+    let tx0 = 0, ty0 = 0;
     document.addEventListener('touchstart', e => {
         if (gameState.gameMode !== 'openworld') return;
         tx0 = e.touches[0].clientX;
@@ -969,22 +1282,45 @@ function showScreen(id) {
     document.getElementById(id).classList.add('active');
 }
 
+function showCustomSetup() {
+    showScreen('screen-custom');
+}
+
+function startCustomGame() {
+    const cols = parseInt(document.getElementById('inp-cols').value);
+    const rows = parseInt(document.getElementById('inp-rows').value);
+    const coreMult = parseInt(document.getElementById('inp-core').value);
+    const pawnMult = parseInt(document.getElementById('inp-pawn').value);
+    gameState.customConfig = { cols, rows, coreMult, pawnMult };
+    startGame('custom');
+}
+
 function startGame(mode) {
     showScreen('screen-game');
 
-    // OW sidebar
     const sidebar = document.getElementById('ow-sidebar');
     sidebar.classList.toggle('hidden', mode !== 'openworld');
 
-    // War legend bar
     const warLegend = document.getElementById('war-legend');
     warLegend.classList.toggle('hidden', mode !== 'perang');
 
-    // Mode label
-    const labels = { normal: 'NORMAL', gawaras: 'GA WARAS', openworld: 'OPEN WORLD', spektator: 'SPEKTATOR', perang: '⚔ PERANG' };
+    const pvpLegend = document.getElementById('pvp-legend');
+    pvpLegend.classList.toggle('hidden', mode !== 'pvp');
+
+    const puasaLegend = document.getElementById('puasa-legend');
+    puasaLegend.classList.toggle('hidden', mode !== 'puasa');
+
+    const labels = {
+        normal: 'NORMAL', gawaras: 'GA WARAS', openworld: 'OPEN WORLD',
+        spektator: 'SPEKTATOR', perang: '⚔ PERANG', custom: '🛠 CUSTOM',
+        pvp: '❤ PVP', puasa: '🐢 PUASA'
+    };
     const modeEl = document.getElementById('mode-label');
     modeEl.textContent = labels[mode] || mode;
     modeEl.classList.toggle('war', mode === 'perang');
+    modeEl.classList.toggle('pvp-label', mode === 'pvp');
+    modeEl.classList.toggle('puasa-label', mode === 'puasa');
+    modeEl.classList.toggle('custom-label', mode === 'custom');
 
     initGame(mode);
 }
