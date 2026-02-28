@@ -54,7 +54,7 @@ let gameState = {
     currentState: [],
     initialState: [],
     currentPlayer: 'white',
-    gameMode: null, // 'normal'|'gawaras'|'openworld'|'spektator'|'perang'|'custom'|'pvp'|'puasa'
+    gameMode: null, // 'normal'|'gawaras'|'openworld'|'spektator'|'perang'|'custom'|'pvp'|'puasa'|'battleroyale'
     boardSize: 8,
     boardCols: 8,  // for custom mode: independent col count
     boardRows: 8,  // for custom mode: independent row count
@@ -72,6 +72,8 @@ let gameState = {
     customConfig: { cols: 8, rows: 8, coreMult: 1, pawnMult: 1 },
     // PvP: HP map, key = "row,col" pointing to current HP
     pvpHP: {},
+    // Battle Royale: full state managed in br.js
+    br: null,
 };
 
 // =============================================
@@ -91,6 +93,7 @@ function inBounds(r, c, rows, cols) {
 function isWar() { return gameState.gameMode === 'perang'; }
 function isPvP() { return gameState.gameMode === 'pvp'; }
 function isPuasa() { return gameState.gameMode === 'puasa'; }
+function isBR() { return gameState.gameMode === 'battleroyale'; }
 
 // Get board dimensions
 function getBoardDims() {
@@ -671,6 +674,10 @@ function initGame(mode) {
         pvpInitHP(gameState.currentState);
     }
 
+    if (mode === 'battleroyale' && typeof brInitGame === 'function') {
+        brInitGame();
+    }
+
     renderBoard();
     updateTurnIndicator();
     updateCheckAlert(null);
@@ -787,6 +794,11 @@ function renderBoard() {
                 if (gameMode === 'spektator' && (!boardRevealed || piece.color !== currentPlayer))
                     pieceEl.classList.add('hidden-piece');
 
+                // BR: show HP/mana bars
+                if (gameMode === 'battleroyale' && typeof brRenderCellOverlay === 'function') {
+                    // overlays added after piece appended
+                }
+
                 // PvP: show HP bar
                 if (pvp) {
                     const hp = pvpGetHP(r, c);
@@ -812,6 +824,11 @@ function renderBoard() {
                 }
 
                 cellEl.appendChild(pieceEl);
+            }
+
+            // BR overlays (HP bar + mana bar)
+            if (gameMode === 'battleroyale' && typeof brRenderCellOverlay === 'function') {
+                brRenderCellOverlay(cellEl, r, c);
             }
 
             frag.appendChild(cellEl);
@@ -841,6 +858,12 @@ function onCellClick(e) {
 
     const row = parseInt(e.currentTarget.dataset.row);
     const col = parseInt(e.currentTarget.dataset.col);
+
+    // Route to BR handler
+    if (gameState.gameMode === 'battleroyale' && typeof brOnCellClick === 'function') {
+        brOnCellClick(row, col);
+        return;
+    }
     const { currentState, currentPlayer, selectedCell, validMoves } = gameState;
     const clicked = currentState[row][col];
 
@@ -1286,6 +1309,19 @@ function showCustomSetup() {
     showScreen('screen-custom');
 }
 
+function showBRSetup() {
+    // Init BR state partially (for spell setup)
+    if (typeof brInitState === 'function') {
+        gameState.br = brInitState();
+    }
+    if (typeof brShowSpellSetup === 'function') {
+        brShowSpellSetup();
+    } else {
+        // fallback: go directly
+        startGame('battleroyale');
+    }
+}
+
 function startCustomGame() {
     const cols = parseInt(document.getElementById('inp-cols').value);
     const rows = parseInt(document.getElementById('inp-rows').value);
@@ -1310,10 +1346,18 @@ function startGame(mode) {
     const puasaLegend = document.getElementById('puasa-legend');
     puasaLegend.classList.toggle('hidden', mode !== 'puasa');
 
+    // BR panels
+    const brLeft = document.getElementById('br-left-panel');
+    const brRight = document.getElementById('br-right-panel');
+    const brInfoBar = document.getElementById('br-info-bar');
+    if (brLeft) brLeft.classList.toggle('hidden', mode !== 'battleroyale');
+    if (brRight) brRight.classList.toggle('hidden', mode !== 'battleroyale');
+    if (brInfoBar) brInfoBar.classList.toggle('hidden', mode !== 'battleroyale');
+
     const labels = {
         normal: 'NORMAL', gawaras: 'GA WARAS', openworld: 'OPEN WORLD',
         spektator: 'SPEKTATOR', perang: '⚔ PERANG', custom: '🛠 CUSTOM',
-        pvp: '❤ PVP', puasa: '🐢 PUASA'
+        pvp: '❤ PVP', puasa: '🐢 PUASA', battleroyale: '🏆 BATTLE ROYALE'
     };
     const modeEl = document.getElementById('mode-label');
     modeEl.textContent = labels[mode] || mode;
@@ -1321,6 +1365,7 @@ function startGame(mode) {
     modeEl.classList.toggle('pvp-label', mode === 'pvp');
     modeEl.classList.toggle('puasa-label', mode === 'puasa');
     modeEl.classList.toggle('custom-label', mode === 'custom');
+    modeEl.classList.toggle('br-label', mode === 'battleroyale');
 
     initGame(mode);
 }

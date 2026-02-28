@@ -23,61 +23,41 @@
             </div>
             <div class="menu-buttons">
                 <button class="btn-mode" onclick="startGame('normal')">
-          <span class="btn-icon">♟</span>
-          <div class="btn-text">
-            <span class="btn-label">START NORMAL</span>
-            <span class="btn-desc">8×8 · Classic Rules</span>
-          </div>
-        </button>
+                    <span class="btn-icon">♟</span>
+                    <div class="btn-text"><span class="btn-label">START NORMAL</span><span class="btn-desc">8×8 · Classic Rules</span></div>
+                </button>
                 <button class="btn-mode" onclick="startGame('gawaras')">
-          <span class="btn-icon">♻</span>
-          <div class="btn-text">
-            <span class="btn-label">START WARAS</span>
-            <span class="btn-desc">8×8 · Pieces Respawn!</span>
-          </div>
-        </button>
+                    <span class="btn-icon">♻</span>
+                    <div class="btn-text"><span class="btn-label">START WARAS</span><span class="btn-desc">8×8 · Pieces Respawn!</span></div>
+                </button>
                 <button class="btn-mode" onclick="startGame('openworld')">
-          <span class="btn-icon">🌐</span>
-          <div class="btn-text">
-            <span class="btn-label">START OPEN WORLD</span>
-            <span class="btn-desc">100×100 · Infinite Battle</span>
-          </div>
-        </button>
+                    <span class="btn-icon">🌐</span>
+                    <div class="btn-text"><span class="btn-label">START OPEN WORLD</span><span class="btn-desc">100×100 · Infinite Battle</span></div>
+                </button>
                 <button class="btn-mode" onclick="startGame('spektator')">
-          <span class="btn-icon">🙈</span>
-          <div class="btn-text">
-            <span class="btn-label">START SPEKTATOR</span>
-            <span class="btn-desc">8×8 · Bidak musuh tersembunyi!</span>
-          </div>
-        </button>
+                    <span class="btn-icon">🙈</span>
+                    <div class="btn-text"><span class="btn-label">START SPEKTATOR</span><span class="btn-desc">8×8 · Bidak musuh tersembunyi!</span></div>
+                </button>
                 <button class="btn-mode btn-war" onclick="startGame('perang')">
-          <span class="btn-icon">⚔️</span>
-          <div class="btn-text">
-            <span class="btn-label">START PERANG</span>
-            <span class="btn-desc">8×8 · Aturan tempur khusus!</span>
-          </div>
-        </button>
+                    <span class="btn-icon">⚔️</span>
+                    <div class="btn-text"><span class="btn-label">START PERANG</span><span class="btn-desc">8×8 · Aturan tempur khusus!</span></div>
+                </button>
                 <button class="btn-mode btn-custom" onclick="showCustomSetup()">
-          <span class="btn-icon">🛠️</span>
-          <div class="btn-text">
-            <span class="btn-label">START CUSTOM</span>
-            <span class="btn-desc">Atur papan & bidak sesukamu!</span>
-          </div>
-        </button>
+                    <span class="btn-icon">🛠️</span>
+                    <div class="btn-text"><span class="btn-label">START CUSTOM</span><span class="btn-desc">Atur papan &amp; bidak sesukamu!</span></div>
+                </button>
                 <button class="btn-mode btn-pvp" onclick="startGame('pvp')">
-          <span class="btn-icon">❤️</span>
-          <div class="btn-text">
-            <span class="btn-label">START PVP</span>
-            <span class="btn-desc">8×8 · Bidak punya nyawa!</span>
-          </div>
-        </button>
+                    <span class="btn-icon">❤️</span>
+                    <div class="btn-text"><span class="btn-label">START PVP</span><span class="btn-desc">8×8 · Bidak punya nyawa!</span></div>
+                </button>
                 <button class="btn-mode btn-puasa" onclick="startGame('puasa')">
-          <span class="btn-icon">🐢</span>
-          <div class="btn-text">
-            <span class="btn-label">START PUASA</span>
-            <span class="btn-desc">8×8 · Semua bidak 1 kotak!</span>
-          </div>
-        </button>
+                    <span class="btn-icon">🐢</span>
+                    <div class="btn-text"><span class="btn-label">START PUASA</span><span class="btn-desc">8×8 · Semua bidak 1 kotak!</span></div>
+                </button>
+                <button class="btn-mode btn-br" onclick="showBRSetup()">
+                    <span class="btn-icon">🏆</span>
+                    <div class="btn-text"><span class="btn-label">START BATTLE ROYALE</span><span class="btn-desc">8×8 · Turn-based MOBA Chess!</span></div>
+                </button>
             </div>
         </div>
     </div>
@@ -112,12 +92,29 @@
                         <span class="custom-hint">Ganda: <span id="val-pawn">1</span>x</span>
                         <input type="range" id="inp-pawn" min="1" max="100" value="1" oninput="document.getElementById('val-pawn').textContent=this.value">
                     </div>
-                    <p class="custom-note">Jumlah pion per baris × ganda (dibagi ke beberapa baris jika penuh)</p>
+                    <p class="custom-note">Jumlah pion per baris × ganda</p>
                 </div>
                 <div class="custom-buttons">
                     <button class="btn-action" onclick="startCustomGame()">▶ MAIN!</button>
                     <button class="btn-action btn-secondary" onclick="backToMenu()">✕ BATAL</button>
                 </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- ===== BATTLE ROYALE SPELL SETUP ===== -->
+    <div id="screen-br-setup" class="screen">
+        <div class="br-setup-content">
+            <div class="br-setup-header">
+                <div class="br-setup-title">🏆 BATTLE ROYALE</div>
+                <div class="br-setup-sub">Pilih 2 Battle Spell untuk</div>
+                <div id="br-setup-player" class="br-setup-player">PUTIH ♔</div>
+            </div>
+            <div id="br-spell-choices" class="br-spell-choices"></div>
+            <div class="br-setup-footer">
+                <div class="br-setup-hint">Pilih tepat 2 spell · Klik untuk toggle</div>
+                <button class="btn-action btn-br-confirm" onclick="brConfirmSpells()">✔ KONFIRMASI</button>
+                <button class="btn-action btn-secondary" onclick="backToMenu()">✕ BATAL</button>
             </div>
         </div>
     </div>
@@ -136,7 +133,6 @@
     <!-- ===== GAME SCREEN ===== -->
     <div id="screen-game" class="screen">
 
-        <!-- Header: turn indicator LEFT, mode label + back button RIGHT -->
         <div class="game-header">
             <div id="turn-indicator" class="turn-indicator">
                 <span id="turn-text">GILIRAN PUTIH ♔</span>
@@ -147,12 +143,10 @@
             </div>
         </div>
 
-        <!-- Check / Checkmate / War alert banner -->
         <div id="check-alert" class="check-alert hidden">
             <span id="check-alert-text">⚠ SKAK!</span>
         </div>
 
-        <!-- Mode Perang: rules reminder bar -->
         <div id="war-legend" class="war-legend hidden">
             <span class="wl-item" title="Benteng tidak bisa dimakan">🏰 Kebal</span>
             <span class="wl-sep">·</span>
@@ -165,32 +159,39 @@
             <span class="wl-item" title="Raja jalan 2 langkah">⚔ Raja×2</span>
         </div>
 
-        <!-- Mode PvP: HP legend bar -->
         <div id="pvp-legend" class="pvp-legend hidden">
-            <span class="pvl-item">♚ 20hp</span>
-            <span class="pvl-sep">·</span>
-            <span class="pvl-item">♛ 15hp</span>
-            <span class="pvl-sep">·</span>
-            <span class="pvl-item">♜ 30hp</span>
-            <span class="pvl-sep">·</span>
-            <span class="pvl-item">♞ 13hp</span>
-            <span class="pvl-sep">·</span>
-            <span class="pvl-item">♝ 10hp</span>
-            <span class="pvl-sep">·</span>
-            <span class="pvl-item">♟ 3hp</span>
-            <span class="pvl-sep">·</span>
+            <span class="pvl-item">♚ 20hp</span><span class="pvl-sep">·</span>
+            <span class="pvl-item">♛ 15hp</span><span class="pvl-sep">·</span>
+            <span class="pvl-item">♜ 30hp</span><span class="pvl-sep">·</span>
+            <span class="pvl-item">♞ 13hp</span><span class="pvl-sep">·</span>
+            <span class="pvl-item">♝ 10hp</span><span class="pvl-sep">·</span>
+            <span class="pvl-item">♟ 3hp</span><span class="pvl-sep">·</span>
             <span class="pvl-item" style="color:#FFB700">Serang=−1hp · Penyerang terpental</span>
         </div>
 
-        <!-- Mode Puasa: legend bar -->
         <div id="puasa-legend" class="puasa-legend hidden">
             <span class="puasa-item">🐢 MODE PUASA: Semua bidak hanya boleh melangkah 1 kotak!</span>
         </div>
 
-        <!-- Game body -->
+        <!-- BR Info Bar -->
+        <div id="br-info-bar" class="br-info-bar hidden">
+            <div id="br-info" class="br-info-text">🎯 Pilih bidak</div>
+        </div>
+
         <div id="game-body" class="game-body">
 
-            <!-- Open World D-pad sidebar (LEFT) — only shown in openworld mode -->
+            <!-- BR Left Panel: unit stats + actions -->
+            <div id="br-left-panel" class="br-side-panel br-left hidden">
+                <div class="br-panel-title">📋 UNIT</div>
+                <div id="br-stats" class="br-stats-box">
+                    <div class="br-unit-hint">Klik bidak</div>
+                </div>
+                <div class="br-panel-sep"></div>
+                <div class="br-panel-title">💥 AKSI</div>
+                <div id="br-actions" class="br-actions-box"></div>
+            </div>
+
+            <!-- OW Sidebar -->
             <div id="ow-sidebar" class="ow-sidebar hidden">
                 <div class="ow-dpad">
                     <button class="dpad-btn" id="dpad-up" ontouchstart="startScroll('up')" ontouchend="stopScroll()" onmousedown="startScroll('up')" onmouseup="stopScroll()">▲</button>
@@ -205,6 +206,15 @@
             <!-- Board -->
             <div id="board-wrapper" class="board-wrapper">
                 <div id="board" class="board"></div>
+            </div>
+
+            <!-- BR Right Panel: spells + log -->
+            <div id="br-right-panel" class="br-side-panel br-right hidden">
+                <div class="br-panel-title">⚡ SPELLS</div>
+                <div id="br-spells" class="br-spells-box"></div>
+                <div class="br-panel-sep"></div>
+                <div class="br-panel-title">📜 LOG</div>
+                <div id="br-log" class="br-log-box"></div>
             </div>
 
         </div>
@@ -224,6 +234,7 @@
     </div>
 
     <script src="script.js"></script>
+    <script src="br.js"></script>
 </body>
 
 </html>
